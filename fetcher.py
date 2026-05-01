@@ -21,8 +21,10 @@ MONTHS_PT = {
 PLANALTO_BASE = "https://www.planalto.gov.br"
 INLABS_BASE = "https://inlabs.in.gov.br"
 
-# Sections where MPs can be published: Section 1 and Extra editions
-DOU_SECTIONS = ["DO1E", "DO1", "DO2E"]
+# Only check extra editions (DO1E) — new MPs are ALWAYS published there.
+# DO1 (regular section) causes false positives: it contains references to old MPs
+# inside portarias, decretos and other ministry acts.
+DOU_SECTIONS = ["DO1E"]
 
 HEADERS = {
     "User-Agent": (
@@ -190,50 +192,58 @@ def _inlabs_login() -> tuple[requests.Session, str] | None:
 
 
 def _parse_dou_xml(xml_content: str, target_date: date) -> list[dict]:
-    """Parses DOU XML content and extracts MP articles."""
+    """Parses DOU XML content and extracts MP articles.
+
+    Only matches articles whose TITLE starts with 'MEDIDA PROVISÓRIA Nº' —
+    this avoids false positives from portarias/decretos that reference old MPs
+    in their body text.
+    """
     year = target_date.year
     period = _planalto_period(year)
     results = []
-    seen = set()
+    seen: set[str] = set()
+
+    # Regex that matches only titles starting with the MP declaration
+    TITLE_RE = re.compile(
+        r"^\s*MEDIDA PROVIS[ÓO]RIA\s+N[ºo°\.°]?\s*([\d\.]+)",
+        re.IGNORECASE,
+    )
+
+    def _try_article(title_text: str, body_text: str) -> None:
+        title_upper = title_text.strip().upper()
+        m = TITLE_RE.match(title_upper)
+        if not m:
+            return
+        numero = m.group(1).replace(".", "")
+        if numero in seen:
+            return
+        seen.add(numero)
+        results.append(_build_mp_dict(numero, year, period, body_text or title_text, target_date))
 
     try:
         root = ET.fromstring(xml_content)
     except ET.ParseError:
-        # Try BeautifulSoup as fallback for malformed XML
+        # Fallback: parse with BeautifulSoup (handles malformed XML)
         soup = BeautifulSoup(xml_content, "lxml-xml")
-        articles = soup.find_all(re.compile(r"article|Artigo|ARTICLE", re.I))
-        if not articles:
-            # Try generic text search on the raw content
-            for m in re.finditer(r"MEDIDA PROVIS[ÓO]RIA\s+N[ºo°]?\s*([\d\.]+)", xml_content, re.I):
-                numero = m.group(1).replace(".", "")
-                if numero not in seen:
-                    seen.add(numero)
-                    results.append(_build_mp_dict(numero, year, period, xml_content[:2000], target_date))
+        for tag in soup.find_all(True):
+            if tag.name and re.search(r"titulo|title|Titulo", tag.name, re.I):
+                _try_article(tag.get_text(" ", strip=True),
+                             tag.parent.get_text(" ", strip=True) if tag.parent else "")
         return results
 
-    # Walk all elements looking for MP titles
+    # Walk all elements; treat short text content as potential title
     for elem in root.iter():
-        title = elem.get("title") or (elem.text or "")
-        title_upper = title.upper()
-        if "MEDIDA PROVIS" not in title_upper:
-            continue
-        m = re.search(r"MEDIDA PROVIS[ÓO]RIA\s+N[ºo°]?\s*([\d\.]+)", title_upper)
-        if not m:
-            continue
-        numero = m.group(1).replace(".", "")
-        if numero in seen:
-            continue
-        seen.add(numero)
+        text = (elem.text or "").strip()
+        if not text or len(text) > 300:
+            continue  # Skip empty or long body paragraphs
+        _try_article(text, ET.tostring(elem.getparent() if hasattr(elem, "getparent") else elem,
+                                       encoding="unicode", method="text") if True else "")
 
-        # Try to get body text from sibling/child elements
-        body = ""
-        parent = elem.getparent() if hasattr(elem, "getparent") else None
-        if parent is not None:
-            body = ET.tostring(parent, encoding="unicode", method="text")
-        if not body:
-            body = ET.tostring(elem, encoding="unicode", method="text")
-
-        results.append(_build_mp_dict(numero, year, period, body, target_date))
+    # Also check 'title' XML attributes
+    for elem in root.iter():
+        attr_title = elem.get("title", "").strip()
+        if attr_title:
+            _try_article(attr_title, ET.tostring(elem, encoding="unicode", method="text"))
 
     return results
 

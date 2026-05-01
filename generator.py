@@ -52,20 +52,31 @@ REGRAS:
 - Cite artigos constitucionais, legais e regimentais relevantes pelo número e diploma.
 - Mantenha tom técnico e imparcial nas seções 1-6; os argumentos (favorável/contrário) podem ser mais assertivos.
 - A recomendação deve ser específica para o parlamentar, não genérica.
+- NÃO inclua na nota informações institucionais do autor do texto (ex: "Assessoria da Liderança do Partido X").
+- NÃO inclua cabeçalhos como "OBJETIVOS", "VIGÊNCIA" isolados — todo o conteúdo deve estar dentro dos campos JSON definidos.
 - Responda APENAS com o JSON válido, sem nenhum texto antes ou depois, sem markdown.
 """
 
 
 def generate_nota_tecnica(mp: dict) -> dict:
+    from datetime import date, timedelta
+
+    pub_date = date.fromisoformat(mp["data_publicacao"]) if mp.get("data_publicacao") else date.today()
+    prazo_60  = (pub_date + timedelta(days=60)).strftime("%d/%m/%Y")
+    prazo_120 = (pub_date + timedelta(days=120)).strftime("%d/%m/%Y")
+
     user_content = (
         f"Gere a Nota Técnica completa para a seguinte Medida Provisória:\n\n"
         f"Número: MP nº {mp['numero']}/{mp['ano']}\n"
-        f"Data de publicação: {mp['data_publicacao']}\n"
+        f"Data de publicação no DOU (Edição Extra): {pub_date.strftime('%d/%m/%Y')}\n"
+        f"Prazo de vigência – 60 dias (1ª prorrogação): {prazo_60}\n"
+        f"Prazo máximo de vigência – 120 dias (2ª prorrogação): {prazo_120}\n"
         f"Ementa: {mp['ementa']}\n"
         f"URL no Planalto: {mp.get('url_planalto', 'N/A')}\n\n"
         f"Texto integral (trecho):\n"
         f"{mp.get('texto_integral', 'Não disponível')[:6000]}\n\n"
-        "Gere a Nota Técnica no formato JSON especificado no system prompt."
+        "Gere a Nota Técnica no formato JSON especificado no system prompt. "
+        "Use os prazos informados acima nas análises de vigência e no campo recomendacao."
     )
 
     client = _get_client()

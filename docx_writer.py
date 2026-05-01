@@ -1,6 +1,6 @@
 import os
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
@@ -144,11 +144,18 @@ def write_nota_tecnica(mp: dict, content: dict, output_dir: str = OUTPUT_DIR) ->
     _add_divider(doc)
 
     # ── Metadata ──────────────────────────────────────────────────────────────
+    pub_date = date.fromisoformat(mp["data_publicacao"]) if mp.get("data_publicacao") else date.today()
+    prazo_60  = pub_date + timedelta(days=60)
+    prazo_120 = pub_date + timedelta(days=120)
+
     doc.add_paragraph().paragraph_format.space_after = Pt(2)
-    _add_metadata_line(doc, "Expedidor:", "Poder Executivo")
-    _add_metadata_line(doc, "Publicação no DOU:", mp.get("data_publicacao", date.today().isoformat()))
-    _add_metadata_line(doc, "Regime de vigência:", "60+60 dias (art. 62 da CF/88)")
-    _add_metadata_line(doc, "Tramitação:", "Câmara dos Deputados → Senado Federal (comissão mista)")
+    _add_metadata_line(doc, "Expedidor:", "Poder Executivo – Presidência da República")
+    _add_metadata_line(doc, "Publicação no DOU (Edição Extra):", pub_date.strftime("%d/%m/%Y"))
+    _add_metadata_line(doc, "Vigência imediata (art. 62, §3º, CF):", pub_date.strftime("%d/%m/%Y"))
+    _add_metadata_line(doc, "Prazo de vigência – 1ª prorrogação (60 dias):", prazo_60.strftime("%d/%m/%Y"))
+    _add_metadata_line(doc, "Prazo máximo de vigência – 2ª prorrogação (120 dias):", prazo_120.strftime("%d/%m/%Y"))
+    _add_metadata_line(doc, "Tramitação:", "Comissão Mista → Câmara dos Deputados → Senado Federal")
+    _add_metadata_line(doc, "Relator na comissão mista:", "a designar")
     _add_metadata_line(doc, "Data de atualização:", date.today().strftime("%d/%m/%Y"))
     if mp.get("url_planalto"):
         _add_metadata_line(doc, "Texto no Planalto:", mp["url_planalto"])
