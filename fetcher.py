@@ -14,9 +14,9 @@ MONTHS_PT = {
 }
 
 PLANALTO_BASE = "https://www.planalto.gov.br"
-CAMARA_API = "https://dadosabertos.camara.leg.br/api/v2"
+DOU_BASE = "https://www.in.gov.br"
 
-# Full browser-like headers to avoid 403 on Planalto
+# Full browser-like headers to reduce chance of 403
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -38,9 +38,11 @@ HEADERS = {
 }
 
 
-def _make_session() -> requests.Session:
+def _make_session(referer: str | None = None) -> requests.Session:
     s = requests.Session()
     s.headers.update(HEADERS)
+    if referer:
+        s.headers["Referer"] = referer
     return s
 
 
@@ -52,6 +54,11 @@ def _planalto_period(year: int) -> str:
 def _format_date_pt(d: date) -> str:
     day_str = f"{d.day}º" if d.day == 1 else str(d.day)
     return f"{day_str} DE {MONTHS_PT[d.month]} DE {d.year}"
+
+
+def _format_date_dou(d: date) -> str:
+    """Format date as DD/MM/YYYY for DOU query parameters."""
+    return d.strftime("%d/%m/%Y")
 
 
 def _extract_numero(text: str, href: str) -> str:
@@ -75,7 +82,6 @@ def _fetch_mp_page(url: str, session: requests.Session | None = None) -> tuple[s
             tag.decompose()
         text = soup.get_text("\n", strip=True)
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        # Ementa is usually within the first meaningful lines after the title
         ementa_lines = []
         for ln in lines[:20]:
             if ln.upper().startswith("MEDIDA PROVISÓRIA") or ln.upper().startswith("A PRESIDENTA") or ln.upper().startswith("O PRESIDENTE"):
@@ -89,36 +95,37 @@ def _fetch_mp_page(url: str, session: requests.Session | None = None) -> tuple[s
         return "", ""
 
 
-def _fetch_planalto(target_date: date) -> list[dict] | None:
-    """Scrapes the Planalto MP index for a given date.
+# ── Source 1: Planalto ────────────────────────────────────────────────────────
 
-    Returns a list of MP dicts, an empty list if no MPs were found today,
-    or None if Planalto is unreachable (triggers fallback).
+def _fetch_planalto(target_date: date) -> list[dict] | None:
+    """Scrapes the Planalto MP index.
+
+    Returns list of MPs, empty list if none found today, or None if unreachable.
     """
     year = target_date.year
     period = _planalto_period(year)
     index_url = f"{PLANALTO_BASE}/ccivil_03/_Ato{period}/{year}/Mpv/"
     date_str = _format_date_pt(target_date)
 
-    # Try both the canonical (mixed-case) and lowercase URL, as Planalto sometimes redirects
-    index_url_lower = index_url.lower()
     logger.info("Consultando Planalto: %s", index_url)
     session = _make_session()
     resp = None
-    for url_attempt in [index_url, index_url_lower]:
+    # Try mixed-case then lowercase (Planalto sometimes redirects to lowercase)
+    for url_attempt in [index_url, index_url.lower()]:
         try:
             session.get(PLANALTO_BASE, timeout=15)
-            resp = session.get(url_attempt, timeout=20, allow_redirects=True)
-            if resp.status_code == 200:
+            r = session.get(url_attempt, timeout=20, allow_redirects=True)
+            if r.status_code == 200:
+                resp = r
                 break
-            resp = None
         except requests.RequestException:
-            resp = None
-    if resp is None:
-        logger.warning("Planalto indisponível – ativando fallback.")
-        return None
-    resp.encoding = resp.apparent_encoding or "utf-8"
+            pass
 
+    if resp is None:
+        logger.warning("Planalto indisponível – tentando DOU.")
+        return None
+
+    resp.encoding = resp.apparent_encoding or "utf-8"
     soup = BeautifulSoup(resp.text, "html.parser")
     results = []
 
@@ -138,7 +145,7 @@ def _fetch_planalto(target_date: date) -> list[dict] | None:
             mp_url = f"{PLANALTO_BASE}/ccivil_03/_Ato{period}/{year}/Mpv/{href_clean}"
 
         numero = _extract_numero(text_upper, href)
-        logger.info("  → MP nº %s encontrada: %s", numero, mp_url)
+        logger.info("  [Planalto] MP nº %s: %s", numero, mp_url)
         ementa, texto = _fetch_mp_page(mp_url, session)
 
         results.append({
@@ -153,58 +160,100 @@ def _fetch_planalto(target_date: date) -> list[dict] | None:
     return results
 
 
-def _fetch_camara_fallback(target_date: date) -> list[dict]:
-    date_str = target_date.isoformat()
-    url = (
-        f"{CAMARA_API}/proposicoes"
-        f"?siglaTipo=MPV"
-        f"&dataApresentacaoInicio={date_str}"
-        f"&dataApresentacaoFim={date_str}"
-        f"&ordem=ASC&ordenarPor=id"
+# ── Source 2: DOU (Diário Oficial da União) ───────────────────────────────────
+
+def _fetch_dou(target_date: date) -> list[dict]:
+    """Scrapes the DOU search for MPs published on target_date.
+
+    The DOU is the primary legal source — MPs are published there first,
+    on the same day, before Planalto indexes them.
+    """
+    date_str_dou = _format_date_dou(target_date)
+    year = target_date.year
+    period = _planalto_period(year)
+
+    # DOU search URL: searches for "Medida Provisória" in all sections for the date
+    search_url = (
+        f"{DOU_BASE}/consulta/-/busca/dou"
+        f"?q=%22Medida+Provis%C3%B3ria%22"
+        f"&s=do1%2Cdoe"          # Section 1 + Extra editions (where MPs are published)
+        f"&publicationDate={date_str_dou}"
     )
-    logger.info("Fallback – consultando API da Câmara: %s", url)
+
+    logger.info("Consultando DOU: %s", search_url)
+    session = _make_session(referer=DOU_BASE)
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=20)
+        session.get(DOU_BASE, timeout=15)
+        resp = session.get(search_url, timeout=25, allow_redirects=True)
         resp.raise_for_status()
-        body = resp.text.strip()
-        if not body:
-            logger.info("API da Câmara: resposta vazia (sem MPs para %s).", date_str)
-            return []
-        items = resp.json().get("dados", [])
+        resp.encoding = resp.apparent_encoding or "utf-8"
     except requests.RequestException as exc:
-        logger.error("API da Câmara indisponível: %s", exc)
-        return []
-    except ValueError:
-        logger.warning("API da Câmara retornou resposta não-JSON (sem MPs para %s).", date_str)
+        logger.warning("DOU indisponível: %s", exc)
         return []
 
+    soup = BeautifulSoup(resp.text, "html.parser")
     results = []
-    for item in items:
-        numero = str(item.get("numero", "???"))
-        ano = int(item.get("ano", target_date.year))
-        period = _planalto_period(ano)
-        ano2d = str(ano)[-2:]
+    seen = set()
+
+    # DOU search results: each result is a card/article with title and metadata
+    for item in soup.find_all(["article", "li", "div"], class_=re.compile(r"resultado|result|item|card", re.I)):
+        text = item.get_text(" ", strip=True)
+        text_upper = text.upper()
+        if "MEDIDA PROVIS" not in text_upper:
+            continue
+
+        # Extract MP number
+        m = re.search(r"MEDIDA PROVIS[ÓO]RIA\s+N[ºo°]?\s*([\d\.]+)", text_upper)
+        if not m:
+            continue
+        numero = m.group(1).replace(".", "")
+        if numero in seen:
+            continue
+        seen.add(numero)
+
+        # Try to get the DOU article link
+        link_tag = item.find("a", href=True)
+        dou_url = ""
+        if link_tag:
+            href = link_tag["href"]
+            dou_url = href if href.startswith("http") else f"{DOU_BASE}{href}"
+
+        # Build expected Planalto URL from the MP number
+        ano2d = str(year)[-2:]
         planalto_url = (
-            f"{PLANALTO_BASE}/ccivil_03/_Ato{period}/{ano}/Mpv/"
+            f"{PLANALTO_BASE}/ccivil_03/_Ato{period}/{year}/Mpv/"
             f"mpv{numero}-{ano2d}.htm"
         )
-        # Try to get the full text from Planalto even in fallback mode
-        ementa_detail = item.get("ementa", "")
-        _, texto = _fetch_mp_page(planalto_url)
 
+        # Extract ementa from the result text
+        ementa = text[:300].strip()
+
+        # Try to get full text from Planalto (may fail if blocked)
+        _, texto = _fetch_mp_page(planalto_url, session)
+        if not texto and dou_url:
+            _, texto = _fetch_mp_page(dou_url, session)
+
+        logger.info("  [DOU] MP nº %s encontrada.", numero)
         results.append({
             "numero": numero,
-            "ano": ano,
-            "ementa": ementa_detail,
-            "data_publicacao": date_str,
+            "ano": year,
+            "ementa": ementa,
+            "data_publicacao": target_date.isoformat(),
             "url_planalto": planalto_url,
-            "texto_integral": texto or ementa_detail,
+            "texto_integral": texto or ementa,
         })
+
+    if not results:
+        logger.info("DOU acessível mas sem MPs em %s.", target_date.isoformat())
     return results
 
 
+# ── Public API ────────────────────────────────────────────────────────────────
+
 def fetch_mps(target_date: date) -> list[dict]:
+    """Fetch MPs published on target_date. Planalto first, DOU as fallback."""
     result = _fetch_planalto(target_date)
     if result is None:
-        return _fetch_camara_fallback(target_date)
+        logger.info("Usando DOU como fonte alternativa.")
+        return _fetch_dou(target_date)
     return result
