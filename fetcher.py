@@ -5,6 +5,8 @@ from datetime import date
 import requests
 from bs4 import BeautifulSoup
 
+import config
+
 logger = logging.getLogger(__name__)
 
 MONTHS_PT = {
@@ -14,9 +16,8 @@ MONTHS_PT = {
 }
 
 PLANALTO_BASE = "https://www.planalto.gov.br"
-DOU_BASE = "https://www.in.gov.br"
+INLABS_BASE = "https://inlabs.in.gov.br"
 
-# Full browser-like headers to reduce chance of 403
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -56,11 +57,6 @@ def _format_date_pt(d: date) -> str:
     return f"{day_str} DE {MONTHS_PT[d.month]} DE {d.year}"
 
 
-def _format_date_dou(d: date) -> str:
-    """Format date as DD/MM/YYYY for DOU query parameters."""
-    return d.strftime("%d/%m/%Y")
-
-
 def _extract_numero(text: str, href: str) -> str:
     m = re.search(r"N[ºo°]?\s*([\d\.]+)", text, re.IGNORECASE)
     if m:
@@ -98,10 +94,7 @@ def _fetch_mp_page(url: str, session: requests.Session | None = None) -> tuple[s
 # ── Source 1: Planalto ────────────────────────────────────────────────────────
 
 def _fetch_planalto(target_date: date) -> list[dict] | None:
-    """Scrapes the Planalto MP index.
-
-    Returns list of MPs, empty list if none found today, or None if unreachable.
-    """
+    """Returns list of MPs, empty list if none today, or None if unreachable."""
     year = target_date.year
     period = _planalto_period(year)
     index_url = f"{PLANALTO_BASE}/ccivil_03/_Ato{period}/{year}/Mpv/"
@@ -110,7 +103,6 @@ def _fetch_planalto(target_date: date) -> list[dict] | None:
     logger.info("Consultando Planalto: %s", index_url)
     session = _make_session()
     resp = None
-    # Try mixed-case then lowercase (Planalto sometimes redirects to lowercase)
     for url_attempt in [index_url, index_url.lower()]:
         try:
             session.get(PLANALTO_BASE, timeout=15)
@@ -122,7 +114,7 @@ def _fetch_planalto(target_date: date) -> list[dict] | None:
             pass
 
     if resp is None:
-        logger.warning("Planalto indisponível – tentando DOU.")
+        logger.warning("Planalto indisponível – tentando Inlabs/DOU.")
         return None
 
     resp.encoding = resp.apparent_encoding or "utf-8"
@@ -160,50 +152,72 @@ def _fetch_planalto(target_date: date) -> list[dict] | None:
     return results
 
 
-# ── Source 2: DOU (Diário Oficial da União) ───────────────────────────────────
+# ── Source 2: Inlabs API (DOU oficial) ───────────────────────────────────────
 
-def _fetch_dou(target_date: date) -> list[dict]:
-    """Scrapes the DOU search for MPs published on target_date.
-
-    The DOU is the primary legal source — MPs are published there first,
-    on the same day, before Planalto indexes them.
-    """
-    date_str_dou = _format_date_dou(target_date)
-    year = target_date.year
-    period = _planalto_period(year)
-
-    # DOU search URL: searches for "Medida Provisória" in all sections for the date
-    search_url = (
-        f"{DOU_BASE}/consulta/-/busca/dou"
-        f"?q=%22Medida+Provis%C3%B3ria%22"
-        f"&s=do1%2Cdoe"          # Section 1 + Extra editions (where MPs are published)
-        f"&publicationDate={date_str_dou}"
-    )
-
-    logger.info("Consultando DOU: %s", search_url)
-    session = _make_session(referer=DOU_BASE)
+def _inlabs_login() -> str | None:
+    """Authenticates with Inlabs and returns the JWT token."""
+    email = getattr(config, "INLABS_EMAIL", "")
+    password = getattr(config, "INLABS_PASSWORD", "")
+    if not email or not password:
+        return None
     try:
-        session.get(DOU_BASE, timeout=15)
-        resp = session.get(search_url, timeout=25, allow_redirects=True)
+        resp = requests.post(
+            f"{INLABS_BASE}/acesso",
+            json={"email": email, "password": password},
+            timeout=15,
+        )
         resp.raise_for_status()
-        resp.encoding = resp.apparent_encoding or "utf-8"
-    except requests.RequestException as exc:
-        logger.warning("DOU indisponível: %s", exc)
+        token = resp.json().get("token") or resp.headers.get("Authorization", "").replace("Bearer ", "")
+        return token or None
+    except Exception as exc:
+        logger.warning("Inlabs: falha na autenticação: %s", exc)
+        return None
+
+
+def _fetch_inlabs(target_date: date) -> list[dict]:
+    """Queries the Inlabs API (official DOU API) for MPs on target_date."""
+    token = _inlabs_login()
+    if not token:
+        logger.warning("Inlabs: credenciais ausentes (INLABS_EMAIL / INLABS_PASSWORD). Sem fallback disponível.")
+        logger.warning("Cadastro gratuito em: https://inlabs.in.gov.br/acesso")
         return []
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+    year = target_date.year
+    period = _planalto_period(year)
+    date_str = target_date.strftime("%Y-%m-%d")
+
+    url = (
+        f"{INLABS_BASE}/opendata/api/1/busca"
+        f"?q=%22Medida+Provis%C3%B3ria%22"
+        f"&s=do1%2Cdoe"        # Seção 1 + Edições Extras
+        f"&dtInicio={date_str}"
+        f"&dtFim={date_str}"
+    )
+    logger.info("Consultando Inlabs/DOU: %s", url)
+
+    try:
+        resp = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=25,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.error("Inlabs API falhou: %s", exc)
+        return []
+
+    items = data if isinstance(data, list) else data.get("items", data.get("results", []))
     results = []
     seen = set()
 
-    # DOU search results: each result is a card/article with title and metadata
-    for item in soup.find_all(["article", "li", "div"], class_=re.compile(r"resultado|result|item|card", re.I)):
-        text = item.get_text(" ", strip=True)
-        text_upper = text.upper()
-        if "MEDIDA PROVIS" not in text_upper:
+    for item in items:
+        title = item.get("title", "") or item.get("titulo", "")
+        title_upper = title.upper()
+        if "MEDIDA PROVIS" not in title_upper:
             continue
 
-        # Extract MP number
-        m = re.search(r"MEDIDA PROVIS[ÓO]RIA\s+N[ºo°]?\s*([\d\.]+)", text_upper)
+        m = re.search(r"N[ºo°]?\s*([\d\.]+)", title_upper)
         if not m:
             continue
         numero = m.group(1).replace(".", "")
@@ -211,29 +225,19 @@ def _fetch_dou(target_date: date) -> list[dict]:
             continue
         seen.add(numero)
 
-        # Try to get the DOU article link
-        link_tag = item.find("a", href=True)
-        dou_url = ""
-        if link_tag:
-            href = link_tag["href"]
-            dou_url = href if href.startswith("http") else f"{DOU_BASE}{href}"
-
-        # Build expected Planalto URL from the MP number
+        ementa = item.get("ementa") or item.get("abstract") or title
+        dou_url = item.get("urlTitle") or item.get("url") or ""
         ano2d = str(year)[-2:]
         planalto_url = (
             f"{PLANALTO_BASE}/ccivil_03/_Ato{period}/{year}/Mpv/"
             f"mpv{numero}-{ano2d}.htm"
         )
 
-        # Extract ementa from the result text
-        ementa = text[:300].strip()
-
-        # Try to get full text from Planalto (may fail if blocked)
-        _, texto = _fetch_mp_page(planalto_url, session)
+        _, texto = _fetch_mp_page(planalto_url)
         if not texto and dou_url:
-            _, texto = _fetch_mp_page(dou_url, session)
+            _, texto = _fetch_mp_page(dou_url)
 
-        logger.info("  [DOU] MP nº %s encontrada.", numero)
+        logger.info("  [Inlabs] MP nº %s encontrada.", numero)
         results.append({
             "numero": numero,
             "ano": year,
@@ -244,16 +248,16 @@ def _fetch_dou(target_date: date) -> list[dict]:
         })
 
     if not results:
-        logger.info("DOU acessível mas sem MPs em %s.", target_date.isoformat())
+        logger.info("Inlabs: nenhuma MP encontrada em %s.", date_str)
     return results
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def fetch_mps(target_date: date) -> list[dict]:
-    """Fetch MPs published on target_date. Planalto first, DOU as fallback."""
+    """Fetch MPs published on target_date. Planalto first, Inlabs/DOU as fallback."""
     result = _fetch_planalto(target_date)
     if result is None:
-        logger.info("Usando DOU como fonte alternativa.")
-        return _fetch_dou(target_date)
+        logger.info("Usando Inlabs/DOU como fonte alternativa.")
+        return _fetch_inlabs(target_date)
     return result

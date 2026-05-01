@@ -10,6 +10,11 @@ RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL", "")
 NOTIFY_IF_EMPTY = os.getenv("NOTIFY_IF_EMPTY", "false").lower() == "true"
 SCHEDULE_TIME = os.getenv("SCHEDULE_TIME", "08:00")
 
+# Inlabs API (DOU oficial) — fallback quando Planalto está inacessível
+# Cadastro gratuito: https://inlabs.in.gov.br/acesso
+INLABS_EMAIL = os.getenv("INLABS_EMAIL", "")
+INLABS_PASSWORD = os.getenv("INLABS_PASSWORD", "")
+
 
 def validate():
     missing = []
