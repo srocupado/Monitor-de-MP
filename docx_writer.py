@@ -324,66 +324,15 @@ def _set_header(doc: Document, title: str, ementa: str, subtitle: str):
     has_logo = os.path.exists(LOGO_PATH)
 
     if has_logo:
-        # Row 1 of header: title centered (left cell) | logo right (right cell)
-        tbl_hdr = header.add_table(rows=1, cols=2, width=Cm(16.5))
-        _tbl = tbl_hdr._tbl
-
-        tblPr = _tbl.find(qn("w:tblPr"))
-        if tblPr is None:
-            tblPr = OxmlElement("w:tblPr")
-            _tbl.insert(0, tblPr)
-
-        tblBorders = OxmlElement("w:tblBorders")
-        for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
-            b = OxmlElement(f"w:{side}")
-            b.set(qn("w:val"),   "none")
-            b.set(qn("w:sz"),    "0")
-            b.set(qn("w:space"), "0")
-            b.set(qn("w:color"), "auto")
-            tblBorders.append(b)
-        tblPr.append(tblBorders)
-
-        tblW = OxmlElement("w:tblW")
-        tblW.set(qn("w:w"), "0")
-        tblW.set(qn("w:type"), "auto")
-        tblPr.append(tblW)
-
-        tblGrid = OxmlElement("w:tblGrid")
-        for w in (8220, 1134):
-            gc = OxmlElement("w:gridCol")
-            gc.set(qn("w:w"), str(w))
-            tblGrid.append(gc)
-        idx = list(_tbl).index(tblPr)
-        _tbl.insert(idx + 1, tblGrid)
-
-        for cell, width in zip(tbl_hdr.rows[0].cells, (8220, 1134)):
-            tc   = cell._tc
-            tcPr = tc.find(qn("w:tcPr"))
-            if tcPr is None:
-                tcPr = OxmlElement("w:tcPr")
-                tc.insert(0, tcPr)
-            tcW = OxmlElement("w:tcW")
-            tcW.set(qn("w:w"),    str(width))
-            tcW.set(qn("w:type"), "dxa")
-            tcPr.insert(0, tcW)
-
-        # Left cell: title only
-        p_title = tbl_hdr.cell(0, 0).paragraphs[0]
-        p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p_title.paragraph_format.space_before = Pt(0)
-        p_title.paragraph_format.space_after  = Pt(0)
-        _hdr_run(p_title, title)
-
-        # Right cell: logo
-        p_logo = tbl_hdr.cell(0, 1).paragraphs[0]
+        # Logo on its own right-aligned paragraph — text follows below, no overlap
+        p_logo = header.add_paragraph()
         p_logo.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         p_logo.paragraph_format.space_before = Pt(0)
         p_logo.paragraph_format.space_after  = Pt(0)
         p_logo.add_run().add_picture(LOGO_PATH, height=Cm(1.5))
-    else:
-        _hdr_para(title)
 
-    # Ementa and subtitle span full width below the title/logo row
+    # Title, ementa and subtitle each on their own centered full-width paragraph
+    _hdr_para(title)
     _hdr_para(ementa)
     _hdr_para(subtitle)
 
