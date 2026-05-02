@@ -47,14 +47,17 @@ formato JSON (sem markdown, sem texto fora do JSON):
   "recomendacao": "[Recomendação estratégica específica e acionável para o parlamentar, incluindo posicionamento sugerido, emendas recomendadas se aplicável, e pontos de atenção no processo legislativo]"
 }
 
-REGRAS:
-- Cada seção deve ter no mínimo 2 parágrafos densos com análise substantiva.
+REGRAS OBRIGATÓRIAS:
+- O JSON deve conter EXATAMENTE as 13 chaves acima — não adicione nem remova chaves.
+- Os valores de "secao_1_titulo" a "secao_6_titulo" devem ser COPIADOS LITERALMENTE do esquema acima, sem alteração.
+- Cada campo secao_X_conteudo deve ter no mínimo 2 parágrafos densos (separados por \\n\\n) com análise substantiva.
 - Cite artigos constitucionais, legais e regimentais relevantes pelo número e diploma.
 - Mantenha tom técnico e imparcial nas seções 1-6; os argumentos (favorável/contrário) podem ser mais assertivos.
 - A recomendação deve ser específica para o parlamentar, não genérica.
-- NÃO inclua na nota informações institucionais do autor do texto (ex: "Assessoria da Liderança do Partido X").
-- NÃO inclua cabeçalhos como "OBJETIVOS", "VIGÊNCIA" isolados — todo o conteúdo deve estar dentro dos campos JSON definidos.
-- Responda APENAS com o JSON válido, sem nenhum texto antes ou depois, sem markdown.
+- NÃO inclua na nota informações institucionais do autor do texto — proibido mencionar partido, assessoria, gabinete ou nome de parlamentar.
+- NÃO use cabeçalhos livres como "CONTEXTO", "OBJETIVOS", "VIGÊNCIA" dentro dos valores — todo conteúdo deve estar exatamente nas 13 chaves definidas.
+- O campo "recomendacao" termina com a recomendação ao parlamentar — NÃO inclua assinatura, data ou nome de órgão.
+- Responda APENAS com o JSON válido, sem nenhum texto antes ou depois, sem markdown, sem blocos de código.
 """
 
 

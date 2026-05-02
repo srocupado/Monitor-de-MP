@@ -256,15 +256,21 @@ def _parse_dou_xml(xml_content: str, target_date: date) -> list[dict]:
                              tag.parent.get_text(" ", strip=True) if tag.parent else "")
         return results
 
-    # Walk all elements; treat short text content as potential title
+    # Build parent map: stdlib ET has no getparent(), so we build it manually.
+    # This lets us climb from a title element to the containing article body.
+    parent_map: dict = {child: parent for parent in root.iter() for child in parent}
+
+    # Walk all elements; treat short text content as potential MP title
     for elem in root.iter():
         text = (elem.text or "").strip()
         if not text or len(text) > 300:
             continue  # Skip empty or long body paragraphs
-        _try_article(text, ET.tostring(elem.getparent() if hasattr(elem, "getparent") else elem,
-                                       encoding="unicode", method="text") if True else "")
+        # Use the parent element so body_text includes the full article content
+        parent = parent_map.get(elem, elem)
+        body_text = ET.tostring(parent, encoding="unicode", method="text")
+        _try_article(text, body_text)
 
-    # Also check 'title' XML attributes
+    # Also check 'title' XML attributes (elem is already the article container)
     for elem in root.iter():
         attr_title = elem.get("title", "").strip()
         if attr_title:
