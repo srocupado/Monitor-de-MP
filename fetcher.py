@@ -380,6 +380,9 @@ def fetch_mps(target_date: date) -> list[dict]:
     """Fetch MPs published on target_date. Planalto first, Inlabs/DOU as fallback."""
     result = _fetch_planalto(target_date)
     if result is None:
-        logger.info("Usando Inlabs/DOU como fonte alternativa.")
+        logger.info("Planalto inacessível – usando Inlabs/DOU como fonte alternativa.")
+        return _fetch_inlabs(target_date)
+    if not result:
+        logger.info("Nenhuma MP encontrada no Planalto – verificando Inlabs/DOU (edição extra).")
         return _fetch_inlabs(target_date)
     return result
