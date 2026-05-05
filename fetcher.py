@@ -203,6 +203,11 @@ def _parse_dou_xml(xml_content: str, target_date: date) -> list[dict]:
     Only matches articles whose TITLE starts with 'MEDIDA PROVISÓRIA Nº' —
     this avoids false positives from portarias/decretos that reference old MPs
     in their body text.
+
+    Note: the date inside the title is the signing date, which may differ from
+    the publication date (e.g. an MP signed April 30 published in a DO1E on
+    May 5). We do NOT filter by signing date — the ZIP itself was downloaded
+    for the specific publication date, so all articles in it are from that day.
     """
     year = target_date.year
     period = _planalto_period(year)
@@ -215,40 +220,16 @@ def _parse_dou_xml(xml_content: str, target_date: date) -> list[dict]:
         re.IGNORECASE,
     )
 
-    # Extracts the publication date embedded in the title, e.g.:
-    # "MEDIDA PROVISÓRIA Nº 1.353, DE 30 DE ABRIL DE 2026"
-    # Character class includes Ç (MARÇO) and all accented letters in month names
-    DATE_IN_TITLE_RE = re.compile(
-        r",\s*DE\s+(\d{1,2})[º°]?\s+DE\s+([A-ZÁÉÍÓÚÀÂÊÔÃÕÜÇ]+)\s+DE\s+(\d{4})",
-        re.IGNORECASE,
-    )
-
-    MONTHS_UPPER = {v: k for k, v in MONTHS_PT.items()}
-
-    def _date_matches_title(title_upper: str) -> bool:
-        """Returns True if the date inside the title equals target_date."""
-        dm = DATE_IN_TITLE_RE.search(title_upper)
-        if not dm:
-            # No date in title — accept cautiously (rare edge case)
-            return True
-        day, month_name, title_year = int(dm.group(1)), dm.group(2).upper(), int(dm.group(3))
-        month = MONTHS_UPPER.get(month_name)
-        if month is None:
-            return True  # Unrecognised month name — accept
-        return date(title_year, month, day) == target_date
-
     def _try_article(title_text: str, body_text: str) -> None:
         title_upper = title_text.strip().upper()
         m = TITLE_RE.match(title_upper)
         if not m:
             return
-        # Reject old MPs: the date inside the title must match the target date
-        if not _date_matches_title(title_upper):
-            return
         numero = m.group(1).replace(".", "")
         if numero in seen:
             return
         seen.add(numero)
+        logger.info("  [XML] MP nº %s encontrada no título: %.120s", numero, title_text.strip())
         results.append(_build_mp_dict(numero, year, period, body_text or title_text, target_date))
 
     try:
@@ -266,11 +247,11 @@ def _parse_dou_xml(xml_content: str, target_date: date) -> list[dict]:
     # This lets us climb from a title element to the containing article body.
     parent_map: dict = {child: parent for parent in root.iter() for child in parent}
 
-    # Walk all elements; treat short text content as potential MP title
+    # Walk all elements; treat text content as potential MP title
     for elem in root.iter():
         text = (elem.text or "").strip()
-        if not text or len(text) > 300:
-            continue  # Skip empty or long body paragraphs
+        if not text or len(text) > 2000:
+            continue  # Skip empty or excessively long body blocks
         # Use the parent element so body_text includes the full article content
         parent = parent_map.get(elem, elem)
         body_text = ET.tostring(parent, encoding="unicode", method="text")
@@ -351,13 +332,14 @@ def _fetch_inlabs(target_date: date) -> list[dict]:
                 continue
 
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                for name in zf.namelist():
-                    if not name.lower().endswith(".xml"):
-                        continue
+                xml_names = [n for n in zf.namelist() if n.lower().endswith(".xml")]
+                logger.info("  [Inlabs] %s: %d arquivo(s) XML no ZIP.", section, len(xml_names))
+                for name in xml_names:
                     xml_data = zf.read(name).decode("utf-8", errors="replace")
-                    if "MEDIDA PROVIS" not in xml_data.upper():
+                    has_mp = "MEDIDA PROVIS" in xml_data.upper()
+                    logger.info("  [Inlabs] %s/%s — contém MP: %s", section, name, has_mp)
+                    if not has_mp:
                         continue
-                    logger.info("  [Inlabs] MP(s) encontrada(s) em %s/%s", section, name)
                     for mp in _parse_dou_xml(xml_data, target_date):
                         if mp["numero"] not in seen_numeros:
                             seen_numeros.add(mp["numero"])
