@@ -263,6 +263,20 @@ def _parse_dou_xml(xml_content: str, target_date: date) -> list[dict]:
         if attr_title:
             _try_article(attr_title, ET.tostring(elem, encoding="unicode", method="text"))
 
+    # Fallback: scan each raw XML line (tags stripped) for MP title patterns.
+    # Catches cases where the DOU XML nests text in child nodes rather than
+    # elem.text, or uses an unexpected element name that the loops above miss.
+    if not results:
+        logger.info("  [XML] Nenhuma MP via ElementTree — tentando scan por linha.")
+        for raw_line in xml_content.splitlines():
+            line = re.sub(r"<[^>]+>", " ", raw_line).strip()
+            if 20 <= len(line) <= 400:
+                _try_article(line, xml_content)
+        if not results:
+            # Log a snippet of the XML to help diagnose the structure
+            snippet = xml_content[:800].replace("\n", " ")
+            logger.warning("  [XML] Nenhuma MP encontrada. Início do XML: %.800s", snippet)
+
     return results
 
 
