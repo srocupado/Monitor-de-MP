@@ -7,9 +7,7 @@ Monitora automaticamente as Medidas Provisórias publicadas no Diário Oficial d
 ## Como funciona
 
 ```
-Planalto.gov.br ──► Busca MPs do dia
-       │ (fallback)
-Inlabs / DOU XML ──► Extrai texto integral
+Inlabs / DOU XML ──► Extrai MPs do dia
                           │
                     Claude Sonnet 4.6
                     (análise legislativa)
@@ -19,7 +17,7 @@ Inlabs / DOU XML ──► Extrai texto integral
                    Envia por e-mail (Gmail)
 ```
 
-1. **Busca** — consulta o índice do Planalto. Se indisponível, usa a API Inlabs (Diário Oficial XML via Imprensa Nacional) como fonte alternativa.
+1. **Busca** — baixa o XML do Diário Oficial via API Inlabs (Imprensa Nacional), nas edições extra (DO1E) e ordinária (DO1) da Seção 1.
 2. **Geração** — envia ementa e texto integral ao Claude Sonnet 4.6, que redige a Nota Informativa com rigor técnico-legislativo.
 3. **Documento** — monta o DOCX com cabeçalho institucional (logo, prazos, caixa de atenção) e converte para PDF via LibreOffice.
 4. **Envio** — anexa DOCX e PDF ao e-mail e dispara via Gmail SMTP.
@@ -56,7 +54,7 @@ GMAIL_USER=seu@gmail.com
 GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
 RECIPIENT_EMAIL=destinatario@email.com
 
-# ── Inlabs / DOU (fallback quando Planalto está fora) ─────────
+# ── Inlabs / DOU ──────────────────────────────────────────────
 INLABS_EMAIL=seu@email.com
 INLABS_PASSWORD=sua_senha_inlabs
 
@@ -84,7 +82,7 @@ python main.py --schedule
 
 ## GitHub Actions
 
-O workflow roda automaticamente **todo dia às 19h BRT (22h UTC)** e pode ser disparado manualmente com uma data específica na aba *Actions* do repositório.
+O workflow roda automaticamente **todo dia às 18h BRT (21h UTC)** e pode ser disparado manualmente com uma data específica na aba *Actions* do repositório.
 
 ### Configurar secrets
 
@@ -108,14 +106,13 @@ Em **Settings → Secrets and variables → Actions**, adicione:
 ```
 Monitor-de-MP/
 ├── main.py            # Orquestrador principal
-├── fetcher.py         # Busca MPs no Planalto e Inlabs/DOU
+├── fetcher.py         # Busca MPs no Inlabs/DOU
 ├── generator.py       # Chama Claude API e gera o texto da nota
 ├── docx_writer.py     # Monta o documento Word (.docx)
 ├── pdf_converter.py   # Converte DOCX → PDF via LibreOffice
 ├── mailer.py          # Envia e-mail com anexos via Gmail SMTP
 ├── config.py          # Lê variáveis de ambiente
 ├── podemos_logo.png   # Logo institucional (cabeçalho do documento)
-├── template.docx      # Template base do documento Word
 ├── requirements.txt
 └── .github/
     └── workflows/
@@ -137,12 +134,11 @@ Cada Nota Informativa contém:
 
 ---
 
-## Fontes de dados
+## Fonte de dados
 
 | Fonte | Uso |
 |---|---|
-| **Planalto** (planalto.gov.br) | Fonte primária — índice diário de MPs |
-| **Inlabs / DOU XML** (inlabs.in.gov.br) | Fallback automático quando Planalto está inacessível |
+| **Inlabs / DOU XML** (inlabs.in.gov.br) | Diário Oficial da União — edições extra (DO1E) e ordinária (DO1) |
 
 ---
 
@@ -152,7 +148,7 @@ Cada Nota Informativa contém:
 |---|---|
 | `anthropic` | Claude API (geração de texto) |
 | `python-docx` | Criação do documento Word |
-| `requests` + `beautifulsoup4` | Scraping do Planalto e parsing HTML |
+| `requests` + `beautifulsoup4` | Requisições HTTP e parsing HTML |
 | `python-dotenv` | Leitura do `.env` |
 | `schedule` | Agendamento local (`--schedule`) |
 | LibreOffice (sistema) | Conversão DOCX → PDF |
