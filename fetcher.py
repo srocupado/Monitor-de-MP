@@ -156,6 +156,7 @@ def _fetch_planalto(target_date: date) -> list[dict] | None:
             "data_publicacao": target_date.isoformat(),
             "url_planalto": mp_url,
             "texto_integral": texto,
+            "edicao_extra": bool(re.search(r"Edi[çc][aã]o Extra", texto, re.IGNORECASE)),
         })
 
     return results
@@ -307,6 +308,7 @@ def _build_mp_dict(numero: str, year: int, period: str, text_excerpt: str, targe
             re.IGNORECASE | re.DOTALL,
         )
         ementa = re.sub(r"\s+", " ", m.group(1)).strip()[:300] if m else stripped[:300]
+    texto_for_detection = texto_planalto or text_excerpt
     return {
         "numero": numero,
         "ano": year,
@@ -314,6 +316,7 @@ def _build_mp_dict(numero: str, year: int, period: str, text_excerpt: str, targe
         "data_publicacao": target_date.isoformat(),
         "url_planalto": planalto_url,
         "texto_integral": texto_planalto or text_excerpt[:6000],
+        "edicao_extra": bool(re.search(r"Edi[çc][aã]o Extra", texto_for_detection, re.IGNORECASE)),
     }
 
 

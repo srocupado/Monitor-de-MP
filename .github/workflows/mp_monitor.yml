@@ -39,6 +39,7 @@ jobs:
           INLABS_EMAIL: ${{ secrets.INLABS_EMAIL }}
           INLABS_PASSWORD: ${{ secrets.INLABS_PASSWORD }}
           NOTIFY_IF_EMPTY: ${{ vars.NOTIFY_IF_EMPTY || 'false' }}
+          ENABLE_WEB_SEARCH: ${{ vars.ENABLE_WEB_SEARCH || 'true' }}
         run: |
           if [ -n "${{ github.event.inputs.date }}" ]; then
             python main.py --date "${{ github.event.inputs.date }}"

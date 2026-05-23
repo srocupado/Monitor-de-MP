@@ -9,6 +9,7 @@ GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL", "")
 NOTIFY_IF_EMPTY = os.getenv("NOTIFY_IF_EMPTY", "false").lower() == "true"
 SCHEDULE_TIME = os.getenv("SCHEDULE_TIME", "08:00")
+ENABLE_WEB_SEARCH = os.getenv("ENABLE_WEB_SEARCH", "true").lower() == "true"
 
 # Inlabs API (DOU oficial) — fallback quando Planalto está inacessível
 # Cadastro gratuito: https://inlabs.in.gov.br/acesso
