@@ -52,6 +52,10 @@ def run(target_date: date):
 
     mps = fetch_mps(target_date)
 
+    if mps is None:
+        logger.error("Falha de conectividade ao buscar MPs. Encerrando sem envio de e-mail.")
+        return
+
     if not mps:
         logger.info("Nenhuma MP publicada em %s.", target_date.strftime("%d/%m/%Y"))
         if config.NOTIFY_IF_EMPTY:

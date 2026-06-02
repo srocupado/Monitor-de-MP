@@ -313,10 +313,13 @@ def _build_mp_dict(numero: str, year: int, period: str, text_excerpt: str, targe
 
 
 def _fetch_inlabs(target_date: date) -> list[dict]:
-    """Downloads DOU XML from Inlabs and extracts MPs for target_date."""
+    """Downloads DOU XML from Inlabs and extracts MPs for target_date.
+
+    Returns list of MPs (empty = none published), or None on connectivity failure.
+    """
     auth = _inlabs_login()
     if not auth:
-        return []
+        return None   # login failed = connectivity error, not "no MPs"
     session, cookie = auth
 
     date_str = target_date.strftime("%Y-%m-%d")
@@ -380,6 +383,18 @@ def _fetch_inlabs(target_date: date) -> list[dict]:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def fetch_mps(target_date: date) -> list[dict]:
-    """Fetch MPs published on target_date via Inlabs/DOU (DO1E + DO1)."""
-    return _fetch_inlabs(target_date)
+def fetch_mps(target_date: date) -> list[dict] | None:
+    """Fetch MPs published on target_date via Inlabs/DOU (DO1E + DO1).
+
+    Returns list of MPs found (empty list = none published today),
+    or None when connectivity to Inlabs failed (caller should not
+    send a false "no MPs" notification in that case).
+    """
+    result = _fetch_inlabs(target_date)
+    if result is None:
+        logger.error(
+            "Inlabs indisponível — não foi possível verificar MPs de %s. "
+            "Nenhuma notificação será enviada.",
+            target_date,
+        )
+    return result
